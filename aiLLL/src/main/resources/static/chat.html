@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+    <meta charset="UTF-8">
+
+    <title>AI Chat</title>
+
+    <style>
+
+        body{
+            font-family: Arial;
+            background:#f5f5f5;
+        }
+
+        #chat{
+            width:600px;
+            margin:auto;
+            background:white;
+            padding:20px;
+            height:500px;
+            overflow:auto;
+            border-radius:10px;
+        }
+
+        .msg{
+            margin:10px 0;
+        }
+
+        .user{
+            text-align:right;
+            color:blue;
+        }
+
+        .ai{
+            text-align:left;
+            color:green;
+            background:#f1f1f1;
+        }
+
+    </style>
+
+</head>
+
+<body>
+
+<h2 align="center">AI Chat</h2>
+
+<div id="chat"></div>
+
+<input id="msg" style="width:500px">
+
+<button onclick="send()">发送</button>
+
+<script>
+
+    let token=localStorage.getItem("token");
+    let userId=localStorage.getItem("userId");
+    console.log("token=",token);
+    console.log("userId=",userId);
+    function send(){
+
+        let text=document.getElementById("msg").value;
+
+        let chat=document.getElementById("chat");
+
+        // 用户消息
+        chat.innerHTML+="<div class='msg user'>"+text+"</div>";
+
+        // AI消息容器
+        let aiDiv=document.createElement("div");
+        aiDiv.className="msg ai";
+        chat.appendChild(aiDiv);
+
+        fetch("/chat/stream",{
+
+            method:"POST",
+
+            headers:{
+                "Content-Type":"application/json",
+                "Authorization":"Bearer " + localStorage.getItem("token"),
+                "userId":localStorage.getItem("userId")
+            },
+
+            body:JSON.stringify({
+                question:text
+            })
+
+        }).then(response=>{
+
+            const reader=response.body.getReader();
+            const decoder=new TextDecoder("utf-8");
+
+            function read(){
+
+                reader.read().then(({done,value})=>{
+
+                    if(done) return;
+
+                    let text=decoder.decode(value);
+
+                    // 去掉 SSE 的 data:
+                    text=text.replaceAll("data:","").replaceAll("\n","");
+
+                    aiDiv.innerHTML+=text;
+
+                    read();
+
+                })
+
+            }
+
+            read();
+
+        })
+
+    }
+
+</script>
+</body>
+
+</html>

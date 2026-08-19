@@ -1,0 +1,38 @@
+version: "3.8"
+services:
+  app:
+    build: .
+    image: ailll-app:latest
+    container_name: ailll-app
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+      - rabbitmq
+    environment:
+      - SPRING_PROFILES_ACTIVE=default
+      - SPRING_DATA_REDIS_HOST=redis
+      - SPRING_RABBITMQ_HOST=rabbitmq
+
+  redis:
+    image: redis:7
+    container_name: ailll-redis
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: ailll-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  nginx:
+    image: nginx:stable
+    container_name: ailll-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app

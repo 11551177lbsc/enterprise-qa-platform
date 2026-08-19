@@ -1,0 +1,45 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  datasource:
+    url: ${MYSQL_URL:jdbc:mysql://localhost:3306/ailll?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&characterEncoding=utf8}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:}
+
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+# 两条 LLM 调用链统一从环境变量读取密钥，不在仓库中提供默认密钥。
+ai:
+  api-key: ${LLM_API_KEY:}
+  base-url: ${AI_BASE_URL:https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation}
+
+llm:
+  api-key: ${LLM_API_KEY:}
+  base-url: ${LLM_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+  model: ${LLM_MODEL:qwen-turbo}
+
+# JWT 密钥至少需要 32 字节；启动前必须通过环境变量提供。
+jwt:
+  secret: ${JWT_SECRET:}
+
+rag:
+  base-url: ${RAG_BASE_URL:http://localhost:8001}
+
+qa:
+  rate-limit:
+    max-per-minute: ${QA_RATE_LIMIT_MAX_PER_MINUTE:10}

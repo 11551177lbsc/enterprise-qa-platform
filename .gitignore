@@ -1,0 +1,39 @@
+# IDE and local environments
+.idea/
+**/.idea/
+.venv/
+venv/
+
+# Java build output
+target/
+**/target/
+*.class
+
+# Python bytecode and caches
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Runtime logs and crash dumps
+logs/
+**/logs/
+*.log
+hs_err_pid*.log
+replay_pid*.log
+
+# Generated vector databases
+chroma_db/
+**/chroma_db/
+
+# Local secrets and machine-specific configuration
+.env
+.env.*
+!.env.example
+application-local.yml
+application-local.yaml
+
+# OS files
+.DS_Store
+Thumbs.db

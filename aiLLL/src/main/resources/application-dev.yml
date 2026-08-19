@@ -1,0 +1,30 @@
+# =============================================================================
+# Dev 环境配置
+# 使用方式: mvn spring-boot:run -Dspring-boot.run.profiles=dev
+# 或在 IDE 中设置 spring.profiles.active=dev
+# =============================================================================
+
+spring:
+  datasource:
+    url: ${MYSQL_URL:jdbc:mysql://localhost:3306/ailll?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        # 同步接口 /api/chat/ask 不需要 RabbitMQ。
+        auto-startup: false
+
+logging:
+  level:
+    org.springframework.amqp.rabbit: WARN
+
+qa:
+  rate-limit:
+    max-per-minute: ${QA_RATE_LIMIT_MAX_PER_MINUTE:10}

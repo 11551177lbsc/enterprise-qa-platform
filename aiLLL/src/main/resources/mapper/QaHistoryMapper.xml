@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.haust.ailll.mapper.QaHistoryMapper">
+
+    <insert id="insert" parameterType="com.haust.ailll.entity.QaHistory">
+        INSERT INTO qa_history(user_id, session_id, question, answer, references_json, status, error_message, create_time)
+        VALUES(#{userId}, #{sessionId}, #{question}, #{answer}, #{referencesJson}, #{status}, #{errorMessage}, NOW())
+    </insert>
+
+    <select id="findById" resultType="com.haust.ailll.entity.QaHistory">
+        SELECT * FROM qa_history WHERE id = #{id}
+    </select>
+
+    <update id="updateStatus" parameterType="com.haust.ailll.entity.QaHistory">
+        UPDATE qa_history SET
+            status = #{status},
+            answer = #{answer},
+            references_json = #{referencesJson},
+            error_message = #{errorMessage},
+            update_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <select id="findBySessionId" resultType="com.haust.ailll.entity.QaHistory">
+        SELECT * FROM qa_history
+        WHERE session_id = #{sessionId}
+        ORDER BY create_time ASC
+    </select>
+
+    <select id="findByUserId" resultType="com.haust.ailll.entity.QaHistory">
+        SELECT * FROM qa_history
+        WHERE user_id = #{userId}
+        ORDER BY create_time DESC
+        LIMIT 100
+    </select>
+
+</mapper>

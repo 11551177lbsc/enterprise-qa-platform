@@ -1,0 +1,14 @@
+# =============================================================================
+# MQ Profile — 启用 RabbitMQ Listener 进行异步问答测试
+# 使用方式: .\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev,mq"
+# =============================================================================
+
+spring:
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        auto-startup: true
