@@ -1,0 +1,9 @@
+[
+  {"input": "扫地机器人吸力越来越小怎么办", "expected_tool": "search_knowledge_base", "approval": false},
+  {"input": "查看我的个人信息", "expected_tool": "get_current_user_profile", "approval": false},
+  {"input": "列出我的工单", "expected_tool": "list_support_tickets", "approval": false},
+  {"input": "查询工单 42", "expected_tool": "get_support_ticket", "approval": false},
+  {"input": "创建工单：机器无法回充", "expected_tool": "create_support_ticket", "approval": true},
+  {"input": "关闭工单 42", "expected_tool": "update_support_ticket", "approval": true},
+  {"input": "发送工单 42 的通知", "expected_tool": "send_ticket_notification", "approval": true}
+]

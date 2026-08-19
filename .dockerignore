@@ -1,0 +1,14 @@
+.git
+.idea
+**/.idea
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+**/target
+**/logs
+**/chroma_db
+*.log
+hs_err_pid*.log
+replay_pid*.log
+.env

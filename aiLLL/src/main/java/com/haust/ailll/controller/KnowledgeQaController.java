@@ -4,8 +4,8 @@ import com.haust.ailll.dto.KnowledgeQaRequest;
 import com.haust.ailll.dto.KnowledgeQaResponse;
 import com.haust.ailll.dto.QaAsyncResponse;
 import com.haust.ailll.service.KnowledgeQaService;
-import com.haust.ailll.util.JwtUtil;
 import com.haust.ailll.util.ResultUtil;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -24,27 +24,20 @@ public class KnowledgeQaController {
     @Autowired
     private KnowledgeQaService knowledgeQaService;
 
-    @Autowired
-    private JwtUtil jwtUtil;
-
     /**
      * 同步知识库问答
      */
     @PostMapping("/ask")
     public ResultUtil ask(@RequestBody KnowledgeQaRequest request,
-                          @RequestHeader("Authorization") String token) {
-        try {
-            Long userId = extractUserId(token);
-            KnowledgeQaResponse response = knowledgeQaService.ask(
-                    userId,
-                    request.getKnowledgeBaseId(),
-                    request.getSessionId(),
-                    request.getQuestion()
-            );
-            return ResultUtil.success(response);
-        } catch (Exception e) {
-            return ResultUtil.error("知识库问答处理失败: " + e.getMessage());
-        }
+                          HttpServletRequest httpRequest) {
+        Long userId = authenticatedUserId(httpRequest);
+        KnowledgeQaResponse response = knowledgeQaService.ask(
+                userId,
+                request.getKnowledgeBaseId(),
+                request.getSessionId(),
+                request.getQuestion()
+        );
+        return ResultUtil.success(response);
     }
 
     /**
@@ -53,35 +46,29 @@ public class KnowledgeQaController {
      */
     @PostMapping("/ask-async")
     public ResultUtil askAsync(@RequestBody KnowledgeQaRequest request,
-                               @RequestHeader("Authorization") String token) {
-        try {
-            Long userId = extractUserId(token);
-            QaAsyncResponse response = knowledgeQaService.askAsync(
-                    userId,
-                    request.getKnowledgeBaseId(),
-                    request.getSessionId(),
-                    request.getQuestion()
-            );
+                               HttpServletRequest httpRequest) {
+        Long userId = authenticatedUserId(httpRequest);
+        QaAsyncResponse response = knowledgeQaService.askAsync(
+                userId,
+                request.getKnowledgeBaseId(),
+                request.getSessionId(),
+                request.getQuestion()
+        );
 
-            if ("REJECTED".equals(response.getStatus())) {
-                return ResultUtil.error("请求过于频繁，请稍后再试");
-            }
-            return ResultUtil.success(response);
-        } catch (Exception e) {
-            return ResultUtil.error("异步问答提交失败: " + e.getMessage());
+        if ("REJECTED".equals(response.getStatus())) {
+            return ResultUtil.error("请求过于频繁，请稍后再试");
         }
+        return ResultUtil.success(response);
     }
 
     /**
      * 从 Authorization 头中提取 userId，解析失败返回 null。
      */
-    private Long extractUserId(String token) {
-        if (token == null || token.isEmpty()) return null;
-        try {
-            String jwt = token.startsWith("Bearer ") ? token.substring(7) : token;
-            return jwtUtil.parseToken(jwt);
-        } catch (Exception e) {
-            return null;
+    private Long authenticatedUserId(HttpServletRequest request) {
+        Object value = request.getAttribute("authenticatedUserId");
+        if (!(value instanceof Long userId)) {
+            throw new IllegalStateException("缺少已认证用户上下文");
         }
+        return userId;
     }
 }

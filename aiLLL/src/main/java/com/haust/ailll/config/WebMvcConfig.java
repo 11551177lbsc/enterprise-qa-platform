@@ -1,6 +1,7 @@
 package com.haust.ailll.config;
 
 import com.haust.ailll.interceptor.JwtInterceptor;
+import com.haust.ailll.interceptor.AgentServiceTokenInterceptor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.*;
 
@@ -10,6 +11,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     @Resource
     private JwtInterceptor jwtInterceptor;
+
+    @Resource
+    private AgentServiceTokenInterceptor agentServiceTokenInterceptor;
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
@@ -26,6 +30,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/**/*.css",
                         "/**/*.js"
                 );
+
+        registry.addInterceptor(agentServiceTokenInterceptor)
+                .addPathPatterns("/internal/agent-tools/**")
+                .order(2);
 
     }
 

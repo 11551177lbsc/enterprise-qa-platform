@@ -8,6 +8,9 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+
 @Component
 public class JwtInterceptor implements HandlerInterceptor {
 
@@ -24,41 +27,40 @@ public class JwtInterceptor implements HandlerInterceptor {
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
             return true;
         }
-        // 1 获取token
-        String token = request.getHeader("Authorization");
-        System.out.println("请求token：" + token);
-        if(token == null || token.isEmpty()){
+        String authorization = request.getHeader("Authorization");
+        if (authorization == null || !authorization.startsWith("Bearer ")) {
 
             response.setStatus(401);
+            response.setContentType("text/plain;charset=UTF-8");
             response.getWriter().write("未登录");
 
             return false;
         }
-        token = token.replace("Bearer ", "");
+        String token = authorization.substring(7).trim();
         try{
 
             // 2 解析token
             Long userId = jwtUtil.parseToken(token);
-            System.out.println("token解析userId：" + userId);
-            // 3 Redis key
             String redisKey = "login:" + userId;
-            System.out.println("redisKey：" + redisKey);
-            // 4 查询Redis
             String redisToken = redisUtil.get(redisKey);
-            System.out.println("redisKey：" + redisKey);
-            if(redisToken == null){
+            if (redisToken == null || !MessageDigest.isEqual(
+                    token.getBytes(StandardCharsets.UTF_8),
+                    redisToken.getBytes(StandardCharsets.UTF_8))) {
 
                 response.setStatus(401);
+                response.setContentType("text/plain;charset=UTF-8");
                 response.getWriter().write("登录过期");
 
                 return false;
             }
 
+            request.setAttribute("authenticatedUserId", userId);
             return true;
 
         }catch (Exception e){
 
             response.setStatus(401);
+            response.setContentType("text/plain;charset=UTF-8");
             response.getWriter().write("token无效");
 
             return false;

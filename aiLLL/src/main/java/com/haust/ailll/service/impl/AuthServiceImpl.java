@@ -12,6 +12,7 @@ import org.springframework.security.crypto.bcrypt.BCrypt;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
+import java.time.Duration;
 
 @Service
 public class AuthServiceImpl implements AuthService {
@@ -39,9 +40,7 @@ public class AuthServiceImpl implements AuthService {
         String token = jwtUtil.generateToken(user.getId());
 
         // Redis保存token
-        redisUtil.set("login:" + user.getId(), token, 3600);
-
-        System.out.println("Redis存入成功：" + token);
+        redisUtil.set("login:" + user.getId(), token, Duration.ofDays(1).toSeconds());
 
         LoginVO vo = new LoginVO();
         vo.setToken(token);

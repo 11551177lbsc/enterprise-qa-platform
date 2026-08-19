@@ -5,6 +5,8 @@ import lombok.Data;
 @Data
 public class ResultUtil {
 
+    private Boolean success;
+
     private Integer code;
 
     private String message;
@@ -13,6 +15,14 @@ public class ResultUtil {
 
     public Integer getCode() {
         return code;
+    }
+
+    public Boolean getSuccess() {
+        return success;
+    }
+
+    public void setSuccess(Boolean success) {
+        this.success = success;
     }
 
     public void setCode(Integer code) {
@@ -39,6 +49,7 @@ public class ResultUtil {
 
         ResultUtil result = new ResultUtil();
 
+        result.setSuccess(true);
         result.setCode(200);
         result.setMessage("success");
         result.setData(data);
@@ -51,6 +62,7 @@ public class ResultUtil {
 
         ResultUtil result = new ResultUtil();
 
+        result.setSuccess(false);
         result.setCode(500);
         result.setMessage(msg);
 

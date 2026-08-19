@@ -5,6 +5,7 @@ import com.haust.ailll.service.ChatService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
 @RequestMapping("/chat")
@@ -15,11 +16,12 @@ public class ChatController {
 
     @PostMapping(value = "/stream", produces = "text/event-stream")
     public SseEmitter chat(@RequestBody ChatRequestDTO dto,
-                           @RequestHeader("userId") Long userId,@RequestHeader("Authorization") String token) {
+                           HttpServletRequest request) {
 
-        System.out.println("进入流式chat接口");
-        System.out.println("token="+token);
-        System.out.println("userId="+userId);
+        Long userId = (Long) request.getAttribute("authenticatedUserId");
+        if (userId == null) {
+            throw new IllegalStateException("缺少已认证用户上下文");
+        }
         // 超时时间 60秒
         SseEmitter emitter = new SseEmitter(60000L);
 

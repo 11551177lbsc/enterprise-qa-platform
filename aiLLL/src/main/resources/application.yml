@@ -12,6 +12,12 @@ spring:
     username: ${MYSQL_USERNAME:root}
     password: ${MYSQL_PASSWORD:}
 
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    baseline-on-migrate: true
+    baseline-version: 1
+    validate-on-migrate: true
+
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
@@ -22,6 +28,7 @@ mybatis:
   mapper-locations: classpath:mapper/*.xml
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    map-underscore-to-camel-case: true
 
 # 两条 LLM 调用链统一从环境变量读取密钥，不在仓库中提供默认密钥。
 ai:
@@ -36,6 +43,9 @@ llm:
 # JWT 密钥至少需要 32 字节；启动前必须通过环境变量提供。
 jwt:
   secret: ${JWT_SECRET:}
+
+agent:
+  service-token: ${AGENT_SERVICE_TOKEN:}
 
 rag:
   base-url: ${RAG_BASE_URL:http://localhost:8001}

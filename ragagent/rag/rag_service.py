@@ -4,10 +4,10 @@
 """
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
-from rag.vector_store import VectorStoreService
-from utils.prompt_loader import load_rag_prompts
+from ragagent.rag.vector_store import VectorStoreService
+from ragagent.utils.prompt_loader import load_rag_prompts
 from langchain_core.prompts import PromptTemplate
-from model.factory import chat_model
+from ragagent.model.factory import chat_model
 
 
 def print_prompt(prompt):

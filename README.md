@@ -1,118 +1,129 @@
-# 企业知识库智能问答平台
+# Enterprise QA Agent：企业知识库与工单执行智能体
 
-Enterprise Knowledge Base Intelligent Q&A Platform
+这是一个面向 AI 应用开发岗位的可运行项目：Python + LangGraph 负责编排、状态恢复、人工审批和流式事件；Java Spring Boot 负责用户鉴权、业务规则、MySQL 与内部工具网关；ChromaDB 提供企业文档语义检索。
 
-## 项目定位
+项目重点不是“套一个聊天页面”，而是展示 Agent 在真实业务系统中的几个关键问题如何落地：身份传递、工具权限、写操作审批、幂等执行、故障恢复、审计记录和可回归评测。
 
-基于 **Java Spring Boot** 主后端 + **Python FastAPI RAG 检索服务** 的企业级知识库智能问答系统。Java 负责用户鉴权、接口编排、Redis 限流、MySQL 历史记录和 LLM API 调用；Python 仅作为无状态的文档向量检索引擎，不处理用户、会话和权限。
+## 核心能力
 
-## 架构概览
+- 显式 `StateGraph`：输入校验 → 规划 → 工具路由 → 人工审批 → 执行 → 汇总。
+- RAG 检索：保留原有文档切分、DashScope Embedding 与 ChromaDB 检索链路。
+- Human-in-the-loop：创建/修改工单、生成通知必须经过 LangGraph `interrupt`。
+- 可恢复运行：生产模式使用 Redis checkpointer，运行元数据和 SSE 事件同样写入 Redis。
+- 双重认证：Python 校验用户 JWT；Java 内部工具网关再次校验 JWT 和独立服务令牌。
+- 身份不可伪造：Java 只使用 JWT 解析出的 `userId`，拒绝模型在工具参数中传入身份或令牌。
+- 幂等与审计：每次 Java 工具调用携带唯一 `invocationId`，数据库阻止重复副作用并保存结果。
+- 向后兼容：原 Java 同步/异步问答接口和 Python `/api/rag/*` 接口继续保留。
+- Agent 评测：数据集覆盖知识查询、用户信息、工单查询、创建、更新、通知及审批策略。
 
-```
-Apifox / Frontend
-        │
-        ▼
-┌──────────────────────────────────────────────────────────────────┐
-│              Java Spring Boot 主后端 (port 8080)                  │
-│                                                                   │
-│  ┌─────────────┐  ┌──────────────────┐  ┌────────────────────┐   │
-│  │ /auth/*     │  │ /api/chat/ask    │  │ /api/chat/ask-async│   │
-│  │ JWT 认证    │  │ 同步 RAG 问答     │  │ 异步 RAG 问答 (MQ)  │   │
-│  └─────────────┘  └───────┬──────────┘  └─────────┬──────────┘   │
-│                           │                        │              │
-│  ┌────────────────────────┼────────────────────────┼──────────┐   │
-│  │ Redis                  │                        │          │   │
-│  │ · JWT token 存储       │    MySQL               │          │   │
-│  │ · 用户级问答限流        │    · user 表           │          │   │
-│  └────────────────────────┤    · qa_history 表     │          │   │
-│                           │    · chat_message 表   │          │   │
-│                           │                        │          │   │
-└───────────────────────────┼────────────────────────┼──────────┘   │
-                            │ HTTP (RestTemplate)                   │
-                            ▼                                       │
-┌──────────────────────────────────────────────────────────────────┐
-│          Python FastAPI RAG 服务 (port 8001, 仅内网)              │
-│                                                                   │
-│  · GET  /api/rag/health    健康检查                               │
-│  · POST /api/rag/search    语义检索 (Top-K)                       │
-│  · POST /api/rag/index     文档入库                               │
-│                         │                                         │
-│                   ChromaDB (嵌入式向量库)                          │
-│                   DashScope Embeddings                            │
-└──────────────────────────────────────────────────────────────────┘
+## 系统架构
+
+```mermaid
+flowchart LR
+    UI["Web / Streamlit / Apifox"] -->|"JWT"| AGENT["Python FastAPI + LangGraph"]
+    AGENT -->|"向量检索"| CHROMA["ChromaDB"]
+    AGENT -->|"JWT + Service Token + Invocation ID"| JAVA["Java Tool Gateway"]
+    AGENT -->|"Checkpoint / Run / SSE"| REDIS["Redis"]
+    JAVA -->|"用户、工单、Outbox、审计"| MYSQL["MySQL + Flyway"]
+    JAVA --> REDIS
+    JAVA -.->|"可选异步问答"| MQ["RabbitMQ"]
 ```
 
-## 职责划分
+### LangGraph 执行路径
 
-| 组件 | 负责 | 不负责 |
-|------|------|--------|
-| **Java Spring Boot** | 用户认证、接口编排、Redis 限流、MySQL 持久化、LLM API 调用、Prompt 构造 | 文档向量化、语义检索 |
-| **Python FastAPI** | 文档加载、文本分块、向量化、ChromaDB 存储、Top-K 检索 | 用户系统、会话管理、权限控制、前端页面 |
-| **MySQL** | user 表、qa_history 问答历史、chat_message 对话记录 | — |
-| **Redis** | JWT token 存储、用户级问答限流计数器 | — |
-| **ChromaDB** | 文档向量存储和相似度检索 | — |
-
-## 项目结构
-
+```text
+validate_input
+      ↓
+   planner ───────────────→ finalize
+      │                         ↑
+      ├─ 读取工具 → execute_read ┘
+      │
+      └─ 写入工具 → interrupt/approval
+                         ├─ 拒绝 → finalize
+                         └─ 批准 → execute_write → planner
 ```
+
+模型只负责生成受约束的规划结果。实际工具名必须位于白名单，工具参数不能包含 `userId`、Token、SQL、Shell 或动态 URL。访问令牌通过 LangGraph runtime context 传递，不写入 checkpoint。
+
+## 技术栈
+
+| 层 | 技术 |
+|---|---|
+| Agent | Python 3.11、LangGraph 1.2、LangChain 1.3、FastAPI、Pydantic |
+| 状态与事件 | Redis Checkpointer、Redis Run Store、Redis Streams、SSE |
+| RAG | ChromaDB、DashScope Embeddings、PDF/TXT 文档加载 |
+| 业务后端 | Java 17、Spring Boot 4、MyBatis、JWT、Flyway |
+| 数据与消息 | MySQL 8、Redis、RabbitMQ |
+| 工程验证 | pytest、JUnit、策略评测集、Docker Compose |
+
+## 目录
+
+```text
 enterprise-qa-platform/
-├── aiLLL/                    # Java Spring Boot 主后端 (Maven, Java 17)
-│   ├── src/main/java/com/haust/ailll/
-│   │   ├── ai/AiClient.java            # LLM 客户端 (DashScope Qwen)
-│   │   ├── client/RagSearchClient.java # RAG 检索 HTTP 客户端
-│   │   ├── config/                     # Spring 配置 (JWT/Redis/RabbitMQ/LLM)
-│   │   ├── controller/                 # REST 控制器
-│   │   │   ├── KnowledgeQaController   # /api/chat/ask + /api/chat/ask-async
-│   │   │   ├── AuthController          # /auth/login + /auth/register
-│   │   │   └── ChatController          # /chat/stream (SSE 流式对话)
-│   │   ├── dto/                        # 请求/响应 DTO
-│   │   ├── entity/                     # 数据库实体 (User, ChatMessage, QaHistory)
-│   │   ├── interceptor/                # JWT 拦截器 + 限流拦截器
-│   │   ├── mapper/                     # MyBatis Mapper
-│   │   ├── mq/                         # RabbitMQ 生产者/消费者
-│   │   ├── service/                    # 业务服务层
-│   │   ├── util/                       # 工具类 (JWT/Redis/Result)
-│   │   └── websocket/                  # WebSocket 会话管理
-│   └── src/main/resources/
-│       ├── application.yml             # 默认配置
-│       ├── application-dev.yml         # 本地开发配置 (禁用 MQ)
-│       ├── application-mq.yml          # MQ 异步测试配置
-│       └── sql/create_qa_history.sql   # 建表 DDL
-│
-├── ragagent/                 # Python RAG 检索服务
-│   ├── rag_server.py                   # FastAPI 入口 (新增)
-│   ├── rag/vector_store.py             # ChromaDB 文档存储与检索
-│   ├── rag/rag_service.py              # RAG 总结服务 (ReAct Agent 使用)
-│   ├── model/factory.py                # LLM + Embedding 工厂
-│   ├── data/                           # 知识库文档 (.txt / .pdf)
-│   └── config/                         # YAML 配置
-│
-└── docs/                     # 文档
-    ├── startup.md
-    ├── api.md
-    ├── interview-notes.md
-    └── resume-project.md
+├─ ragagent/
+│  ├─ agent/                 # StateGraph、planner、policy、checkpoint、events
+│  ├─ api/                   # Agent API 与兼容 RAG API
+│  ├─ clients/               # Java Tool Gateway 客户端
+│  ├─ persistence/           # Memory/Redis Run Store
+│  ├─ security/              # Java 兼容的 HS256 JWT 校验
+│  ├─ evals/                 # Agent 路由与审批评测集
+│  └─ tests/                 # 单元与图集成测试
+├─ aiLLL/
+│  └─ src/main/
+│     ├─ java/.../controller/internal/AgentToolController.java
+│     └─ resources/db/migration/  # Flyway V1/V2
+├─ docker-compose.yml
+└─ docs/
 ```
 
-## 当前稳定版本
+## 一键启动
 
-- **同步问答**: `POST /api/chat/ask` — 完整的 RAG 检索 + LLM 回答 + 历史持久化
-- **异步问答**: `POST /api/chat/ask-async` — 投递 RabbitMQ 后立即返回 taskId，WebSocket 推送结果（MQ 组件已就绪，可在 dev,mq profile 下启用）
-- 原有简单对话 `/chat/stream`、用户认证 `/auth/*` 保持不变
-- Python RAG 服务独立部署在 8001 端口，仅 Java 后端内网调用
+前置条件：Docker Desktop / Docker Engine + Compose。
 
-## 快速开始
+```powershell
+Copy-Item .env.example .env
+# 编辑 .env，至少填写 MySQL 密码、JWT_SECRET、AGENT_SERVICE_TOKEN；
+# 需要真实模型和向量检索时再填写 DASHSCOPE_API_KEY / LLM_API_KEY。
 
-详见 [docs/startup.md](docs/startup.md)
+docker compose up --build
+```
 
-## API 文档
+启动后：
 
-详见 [docs/api.md](docs/api.md)
+- Java API：`http://127.0.0.1:8080`
+- LangGraph Agent：`http://127.0.0.1:8001`
+- Agent OpenAPI：`http://127.0.0.1:8001/docs`
+- RabbitMQ 管理页：`http://127.0.0.1:15672`
 
-## 面试问答
+Flyway 会在 Java 首次启动时自动创建/升级表，不需要手工复制 SQL 到 DataGrip。已有非空旧库会建立版本 1 基线，再执行 `V2__agent_tool_gateway.sql`；全新数据库会依次执行 V1、V2。
 
-详见 [docs/interview-notes.md](docs/interview-notes.md)
+详细步骤见 [本地启动指南](docs/startup.md)，接口见 [API 文档](docs/api.md)，设计取舍见 [Agent 设计说明](docs/agent-design.md)。
 
-## 简历项目描述
+## 测试
 
-详见 [docs/resume-project.md](docs/resume-project.md)
+```powershell
+# Python Agent、HITL、策略和鉴权
+.\.venv\Scripts\python.exe -m pytest ragagent\tests -q
+
+# Java JWT 与构建测试
+Set-Location aiLLL
+.\mvnw.cmd test
+```
+
+当前自动化覆盖：读取工具无需审批、写工具暂停与恢复、拒绝不产生副作用、JWT 兼容、身份参数防篡改、API 401 边界和 7 类规划评测用例。
+
+## 安全设计
+
+- 仓库不保存 `.env`、数据库密码、JWT 密钥或 DashScope Key。
+- Python 和 Java 都验证用户 JWT；内部接口还要求 32 字节以上的服务令牌。
+- Java 不相信 Agent 传入的用户身份，只读取拦截器写入的认证上下文。
+- 写工具默认暂停；通知只进入 `notification_outbox`，当前版本不会擅自发送外部邮件。
+- `agent_tool_execution.invocation_id` 是主键；相同调用无法重复创建工单。
+- `/api/rag/index` 默认关闭，需要明确设置 `RAG_ALLOW_INDEXING=true` 才可写向量库。
+- 只输出执行摘要和工具事件，不保存或展示模型隐藏推理过程。
+
+## 当前边界
+
+- 本项目未提供生产邮件消费者；Outbox 仅用于展示安全的异步副作用边界。
+- 本地无 DashScope Key 时，Agent 使用确定性规划降级，便于测试；配置 Key 后 `auto` 模式优先使用结构化模型规划。
+- Streamlit 是演示客户端，正式产品可复用 REST + SSE API 接入任意前端。

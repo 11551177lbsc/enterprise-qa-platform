@@ -1,0 +1,94 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ailll}
+      MYSQL_USER: ${MYSQL_USERNAME:-ailll}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在.env中设置MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在.env中设置MYSQL_ROOT_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  java-api:
+    build: ./aiLLL
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      MYSQL_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-ailll}?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      MYSQL_USERNAME: ${MYSQL_USERNAME:-ailll}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_HOST: redis
+      RABBITMQ_HOST: rabbitmq
+      JWT_SECRET: ${JWT_SECRET:?请在.env中设置JWT_SECRET}
+      AGENT_SERVICE_TOKEN: ${AGENT_SERVICE_TOKEN:?请在.env中设置AGENT_SERVICE_TOKEN}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      RAG_BASE_URL: http://agent-api:8001
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  agent-api:
+    build:
+      context: .
+      dockerfile: ragagent/Dockerfile
+    environment:
+      AGENT_ENV: dev
+      AGENT_CHECKPOINT_BACKEND: redis
+      REDIS_URL: redis://redis:6379/1
+      JAVA_TOOL_BASE_URL: http://java-api:8080
+      JWT_SECRET: ${JWT_SECRET}
+      AGENT_SERVICE_TOKEN: ${AGENT_SERVICE_TOKEN}
+      AGENT_PLANNER_MODE: auto
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      RAG_ALLOW_INDEXING: "false"
+      AGENT_CORS_ORIGINS: http://localhost:8501
+    ports:
+      - "8001:8001"
+    volumes:
+      - chroma-data:/app/ragagent/chroma_db
+    depends_on:
+      redis:
+        condition: service_healthy
+      java-api:
+        condition: service_started
+
+volumes:
+  mysql-data:
+  redis-data:
+  chroma-data:

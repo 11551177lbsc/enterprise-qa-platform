@@ -19,8 +19,6 @@ public class AuthController {
 
     @PostMapping("/login")
     public LoginVO login(@RequestBody LoginDTO loginDTO){
-        System.out.println("username = " + loginDTO.getUsername());
-        System.out.println("password = " + loginDTO.getPassword());
         return authService.login(loginDTO);
 
     }
