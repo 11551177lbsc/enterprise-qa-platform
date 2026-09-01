@@ -1,13 +1,15 @@
 # Enterprise QA Agent：企业知识库与工单执行智能体
 
-这是一个面向 AI 应用开发岗位的可运行项目：Python + LangGraph 负责编排、状态恢复、人工审批和流式事件；Java Spring Boot 负责用户鉴权、业务规则、MySQL 与内部工具网关；ChromaDB 提供企业文档语义检索。
+这是一个可运行的企业支持解决中心：Python + LangGraph 负责知识检索、问题分流、状态恢复、人工审批和流式事件；Java Spring Boot 负责用户鉴权、工单规则、MySQL 与内部工具网关；ChromaDB 提供企业文档语义检索。
 
-项目重点不是“套一个聊天页面”，而是展示 Agent 在真实业务系统中的几个关键问题如何落地：身份传递、工具权限、写操作审批、幂等执行、故障恢复、审计记录和可回归评测。
+它解决的不是“和大模型聊天”，而是企业支持中的完整闭环：先从受控知识中给出有证据的解决方案；证据不足时拒绝猜测并生成工单草稿；用户批准后再写入业务系统；后续继续查询、更新和通知工单。项目同时展示身份传递、工具权限、写操作审批、幂等执行、故障恢复、审计记录和可回归评测。
 
 ## 核心能力
 
 - 显式 `StateGraph`：输入校验 → 规划 → 工具路由 → 人工审批 → 执行 → 汇总。
 - RAG 检索：保留原有文档切分、DashScope Embedding 与 ChromaDB 检索链路。
+- 置信度分流：低于可配置阈值时不直接回答，返回升级原因、下一步和结构化工单草稿。
+- 支持工作台：页面内完成注册、登录、知识问答、证据查看、工单升级和审批，不再复制 JWT。
 - Human-in-the-loop：创建/修改工单、生成通知必须经过 LangGraph `interrupt`。
 - 可恢复运行：生产模式使用 Redis checkpointer，运行元数据和 SSE 事件同样写入 Redis。
 - 双重认证：Python 校验用户 JWT；Java 内部工具网关再次校验 JWT 和独立服务令牌。
@@ -20,7 +22,8 @@
 
 ```mermaid
 flowchart LR
-    UI["Web / Streamlit / Apifox"] -->|"JWT"| AGENT["Python FastAPI + LangGraph"]
+    UI["企业支持解决中心"] -->|"登录"| JAVA
+    UI -->|"JWT"| AGENT["Python FastAPI + LangGraph"]
     AGENT -->|"向量检索"| CHROMA["ChromaDB"]
     AGENT -->|"JWT + Service Token + Invocation ID"| JAVA["Java Tool Gateway"]
     AGENT -->|"Checkpoint / Run / SSE"| REDIS["Redis"]
@@ -93,11 +96,12 @@ docker compose up --build
 - Java API：`http://127.0.0.1:8080`
 - LangGraph Agent：`http://127.0.0.1:8001`
 - Agent OpenAPI：`http://127.0.0.1:8001/docs`
+- 支持中心：`http://127.0.0.1:8501`
 - RabbitMQ 管理页：`http://127.0.0.1:15672`
 
 Flyway 会在 Java 首次启动时自动创建/升级表，不需要手工复制 SQL 到 DataGrip。已有非空旧库会建立版本 1 基线，再执行 `V2__agent_tool_gateway.sql`；全新数据库会依次执行 V1、V2。
 
-详细步骤见 [本地启动指南](docs/startup.md)，接口见 [API 文档](docs/api.md)，设计取舍见 [Agent 设计说明](docs/agent-design.md)。
+详细步骤见 [本地启动指南](docs/startup.md)，产品路线见 [产品规划](docs/product-roadmap.md)，接口见 [API 文档](docs/api.md)，设计取舍见 [Agent 设计说明](docs/agent-design.md)。
 
 ## 测试
 
@@ -126,4 +130,5 @@ Set-Location aiLLL
 
 - 本项目未提供生产邮件消费者；Outbox 仅用于展示安全的异步副作用边界。
 - 本地无 DashScope Key 时，Agent 使用确定性规划降级，便于测试；配置 Key 后 `auto` 模式优先使用结构化模型规划。
-- Streamlit 是演示客户端，正式产品可复用 REST + SSE API 接入任意前端。
+- Streamlit 是当前可用的支持工作台；若进入正式生产，应再替换为独立 Web 前端和 HttpOnly Cookie/BFF 鉴权。
+- 当前置信度阈值是基于本地知识库样本设置的工程基线，不代表已完成真实企业数据标定。

@@ -62,3 +62,5 @@ async def test_authenticated_run_completes_through_http_api(settings):
             assert result.json()["userId"] == 7
             assert "充电座" in result.json()["answer"]
             assert result.json()["citations"][0]["source"] == "故障排除.txt"
+            assert result.json()["resolution"]["outcome"] == "answered"
+            assert result.json()["resolution"]["confidence"] == 0.88

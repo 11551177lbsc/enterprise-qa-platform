@@ -35,6 +35,32 @@ Authorization: Bearer <Java 登录返回的 JWT>
 
 状态：`queued`、`running`、`waiting_approval`、`completed`、`failed`、`cancelled`。
 
+知识问答结束后会返回面向业务页面的结构化处理结论：
+
+```json
+{
+  "status": "completed",
+  "answer": "根据知识库资料……",
+  "citations": [
+    {
+      "chunkId": "...",
+      "source": "故障排除.txt",
+      "score": 0.68,
+      "excerpt": "……"
+    }
+  ],
+  "resolution": {
+    "outcome": "answered",
+    "confidence": 0.68,
+    "reason": "知识库已命中高于安全阈值的资料。",
+    "nextSteps": ["按知识库步骤逐项排查"],
+    "ticketDraft": null
+  }
+}
+```
+
+`outcome` 可为 `answered`、`needs_clarification`、`escalation_recommended`、`action_completed`。当知识证据低于 `RAG_CONFIDENCE_THRESHOLD` 时，接口返回 `escalation_recommended` 和 `ticketDraft`，但不会自动创建工单；用户仍需发起升级并批准写操作。
+
 ### 订阅事件
 
 `GET /api/agent/runs/{runId}/events`

@@ -55,7 +55,12 @@ class EnterpriseAgentGraph:
             return {"final_answer": "已达到最大执行步数，操作已安全停止。", "next_action": "final"}
         decision = await self._planner.plan(state)
         if decision.action == "final":
-            return {"intent": decision.intent, "final_answer": decision.answer, "next_action": "final"}
+            return {
+                "intent": decision.intent,
+                "final_answer": decision.answer,
+                "resolution": decision.resolution.model_dump() if decision.resolution else None,
+                "next_action": "final",
+            }
         assert decision.tool_name is not None
         validate_tool_call(decision.tool_name, decision.arguments)
         call = {

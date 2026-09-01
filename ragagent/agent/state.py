@@ -17,6 +17,7 @@ class AgentState(TypedDict, total=False):
     pending_tool_call: dict[str, Any] | None
     tool_results: list[dict[str, Any]]
     citations: list[dict[str, Any]]
+    resolution: dict[str, Any] | None
     approval: dict[str, Any] | None
     step_count: int
     max_steps: int

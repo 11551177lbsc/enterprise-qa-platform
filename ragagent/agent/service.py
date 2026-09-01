@@ -17,6 +17,7 @@ from ragagent.schemas.agent import (
     Citation,
     PendingApproval,
     RunStatus,
+    ResolutionSummary,
 )
 from ragagent.security.jwt_auth import AuthenticatedUser
 from ragagent.settings import Settings
@@ -134,11 +135,14 @@ class AgentRunService:
                 return
 
             citations = [Citation.model_validate(item) for item in result.get("citations", [])]
+            raw_resolution = result.get("resolution")
+            resolution = ResolutionSummary.model_validate(raw_resolution) if raw_resolution else None
             await self.store.update(
                 run.runId,
                 status=RunStatus.COMPLETED,
                 answer=result.get("final_answer"),
                 citations=citations,
+                resolution=resolution,
                 pendingApproval=None,
             )
             await self._emit(run.runId, "run.completed", {"answer": result.get("final_answer")})

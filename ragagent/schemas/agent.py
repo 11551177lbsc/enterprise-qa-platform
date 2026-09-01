@@ -21,6 +21,13 @@ class RunStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class ResolutionOutcome(StrEnum):
+    ANSWERED = "answered"
+    NEEDS_CLARIFICATION = "needs_clarification"
+    ESCALATION_RECOMMENDED = "escalation_recommended"
+    ACTION_COMPLETED = "action_completed"
+
+
 class AgentRunRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     threadId: str | None = Field(default=None, min_length=1, max_length=100)
@@ -31,6 +38,22 @@ class Citation(BaseModel):
     source: str
     score: float
     excerpt: str
+
+
+class TicketDraft(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(min_length=1, max_length=4000)
+    priority: str = Field(pattern="^(LOW|MEDIUM|HIGH|URGENT)$")
+
+
+class ResolutionSummary(BaseModel):
+    """面向业务页面的结构化处理结论，而不是模型隐藏推理。"""
+
+    outcome: ResolutionOutcome
+    confidence: float = Field(ge=0, le=1)
+    reason: str = Field(min_length=1, max_length=500)
+    nextSteps: list[str] = Field(default_factory=list, max_length=5)
+    ticketDraft: TicketDraft | None = None
 
 
 class PendingApproval(BaseModel):
@@ -48,6 +71,7 @@ class AgentRun(BaseModel):
     input: str
     answer: str | None = None
     citations: list[Citation] = Field(default_factory=list)
+    resolution: ResolutionSummary | None = None
     pendingApproval: PendingApproval | None = None
     error: str | None = None
     createdAt: datetime = Field(default_factory=utc_now)

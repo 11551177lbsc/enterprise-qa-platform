@@ -25,6 +25,7 @@ class Settings:
     run_ttl_seconds: int
     cors_origins: tuple[str, ...]
     allow_indexing: bool
+    rag_confidence_threshold: float
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -46,6 +47,7 @@ class Settings:
             run_ttl_seconds=int(os.getenv("AGENT_RUN_TTL_SECONDS", "604800")),
             cors_origins=origins,
             allow_indexing=_bool_env("RAG_ALLOW_INDEXING", False),
+            rag_confidence_threshold=float(os.getenv("RAG_CONFIDENCE_THRESHOLD", "0.58")),
         )
 
     def validate(self) -> None:
@@ -60,3 +62,5 @@ class Settings:
             raise RuntimeError("AGENT_PLANNER_MODE 只能是 auto、heuristic 或 llm")
         if self.max_steps < 1 or self.max_steps > 20:
             raise RuntimeError("AGENT_MAX_STEPS 必须在 1 到 20 之间")
+        if not 0 < self.rag_confidence_threshold < 1:
+            raise RuntimeError("RAG_CONFIDENCE_THRESHOLD 必须在 0 和 1 之间")

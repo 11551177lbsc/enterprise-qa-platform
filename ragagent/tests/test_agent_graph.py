@@ -52,7 +52,45 @@ async def test_read_tool_executes_without_approval(settings):
     assert result["status"] == "completed"
     assert "过滤网" in result["final_answer"]
     assert result["citations"][0]["source"] == "维护保养.txt"
+    assert result["resolution"]["outcome"] == "answered"
+    assert result["resolution"]["confidence"] == 0.91
     assert tools.calls[0][2] == "jwt-read"
+
+
+@pytest.mark.asyncio
+async def test_low_confidence_knowledge_recommends_ticket_without_writing(settings):
+    class LowConfidenceTools(FakeTools):
+        async def execute(self, tool_name, arguments, access_token, invocation_id):
+            self.calls.append((tool_name, arguments, access_token, invocation_id))
+            return [
+                {
+                    "chunkId": "weak-chunk",
+                    "source": "维护保养.txt",
+                    "score": 0.41,
+                    "content": "这是一个与问题关联较弱的片段。",
+                }
+            ]
+
+    tools = LowConfidenceTools()
+    planner = AgentPlanner(settings)
+    graph = EnterpriseAgentGraph(planner, tools).compile(InMemorySaver())
+    result = await graph.ainvoke(
+        {
+            "input_text": "公司的年假怎么申请？",
+            "run_id": "run-low-confidence",
+            "thread_id": "thread-low-confidence",
+            "user_id": 1,
+            "max_steps": 6,
+        },
+        config={"configurable": {"thread_id": "thread-low-confidence"}},
+        context=AgentContext(access_token="jwt-read"),
+    )
+
+    resolution = result["resolution"]
+    assert resolution["outcome"] == "escalation_recommended"
+    assert resolution["ticketDraft"]["title"] == "公司的年假怎么申请"
+    assert resolution["ticketDraft"]["priority"] == "MEDIUM"
+    assert len(tools.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -82,6 +120,7 @@ async def test_write_tool_waits_for_approval_then_resumes(settings):
     )
     assert resumed["status"] == "completed"
     assert resumed["tool_results"][0]["data"]["id"] == 42
+    assert resumed["resolution"]["outcome"] == "action_completed"
     assert len(tools.calls) == 1
 
 
