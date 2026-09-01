@@ -22,6 +22,15 @@ class KnowledgeTools:
         }]
 
 
+class FeedbackClient:
+    def __init__(self):
+        self.calls = []
+
+    async def submit_feedback(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"recorded": True, "outcome": kwargs["outcome"]}
+
+
 @pytest.mark.asyncio
 async def test_health_and_authentication_boundary(settings):
     app = create_app(settings=settings, tools=UnusedTools())
@@ -38,7 +47,8 @@ async def test_health_and_authentication_boundary(settings):
 
 @pytest.mark.asyncio
 async def test_authenticated_run_completes_through_http_api(settings):
-    app = create_app(settings=settings, tools=KnowledgeTools())
+    feedback_client = FeedbackClient()
+    app = create_app(settings=settings, tools=KnowledgeTools(), feedback_client=feedback_client)
     token = jwt.encode({"sub": "7", "exp": 4102444800}, settings.jwt_secret, algorithm="HS256")
     headers = {"Authorization": f"Bearer {token}"}
     transport = httpx.ASGITransport(app=app)
@@ -64,3 +74,21 @@ async def test_authenticated_run_completes_through_http_api(settings):
             assert result.json()["citations"][0]["source"] == "故障排除.txt"
             assert result.json()["resolution"]["outcome"] == "answered"
             assert result.json()["resolution"]["confidence"] == 0.88
+
+            feedback = await client.post(
+                f"/api/agent/runs/{run_id}/feedback",
+                headers=headers,
+                json={"outcome": "UNRESOLVED", "comment": "仍未解决"},
+            )
+            assert feedback.status_code == 200
+            assert feedback.json()["recorded"] is True
+            assert feedback_client.calls[0]["question"] == "机器人无法回充怎么办"
+            assert feedback_client.calls[0]["confidence"] == 0.88
+
+            other_token = jwt.encode({"sub": "8", "exp": 4102444800}, settings.jwt_secret, algorithm="HS256")
+            forbidden = await client.post(
+                f"/api/agent/runs/{run_id}/feedback",
+                headers={"Authorization": f"Bearer {other_token}"},
+                json={"outcome": "UNRESOLVED"},
+            )
+            assert forbidden.status_code == 404

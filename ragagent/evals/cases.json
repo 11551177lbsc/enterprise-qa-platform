@@ -5,5 +5,6 @@
   {"input": "查询工单 42", "expected_tool": "get_support_ticket", "approval": false},
   {"input": "创建工单：机器无法回充", "expected_tool": "create_support_ticket", "approval": true},
   {"input": "关闭工单 42", "expected_tool": "update_support_ticket", "approval": true},
-  {"input": "发送工单 42 的通知", "expected_tool": "send_ticket_notification", "approval": true}
+  {"input": "发送工单 42 的通知", "expected_tool": "send_ticket_notification", "approval": true},
+  {"input": "查看工单 42 的处理时间线", "expected_tool": "get_ticket_timeline", "approval": false}
 ]

@@ -13,6 +13,13 @@ public class SupportTicket {
     private String priority;
     private String status;
     private Integer version;
+    private String category;
+    private String productModel;
+    private LocalDateTime slaDueAt;
+    private Double knowledgeConfidence;
+    private String escalationReason;
+    private String resolutionCode;
+    private Long assignedTo;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

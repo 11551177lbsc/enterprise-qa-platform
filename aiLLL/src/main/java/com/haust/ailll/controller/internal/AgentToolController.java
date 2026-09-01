@@ -38,6 +38,13 @@ public class AgentToolController {
         return ResultUtil.success(service.getTicket(userId(request), ticketId, invocationId));
     }
 
+    @GetMapping("/tickets/{ticketId}/timeline")
+    public ResultUtil ticketTimeline(HttpServletRequest request,
+                                     @PathVariable Long ticketId,
+                                     @RequestHeader("X-Agent-Invocation-Id") String invocationId) {
+        return ResultUtil.success(service.ticketTimeline(userId(request), ticketId, invocationId));
+    }
+
     @PostMapping("/tickets")
     public ResultUtil createTicket(HttpServletRequest request,
                                    @Valid @RequestBody CreateTicketRequest payload,

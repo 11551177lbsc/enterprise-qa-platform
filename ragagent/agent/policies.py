@@ -5,6 +5,7 @@ READ_TOOLS = {
     "get_current_user_profile",
     "list_support_tickets",
     "get_support_ticket",
+    "get_ticket_timeline",
 }
 
 WRITE_TOOLS = {

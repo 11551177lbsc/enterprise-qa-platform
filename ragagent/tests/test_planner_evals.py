@@ -35,6 +35,7 @@ async def test_escalated_ticket_prompt_preserves_structured_fields(settings):
     assert decision.tool_name == "create_support_ticket"
     assert decision.arguments["title"] == "充电座出现冒烟"
     assert decision.arguments["priority"] == "URGENT"
+    assert decision.arguments["category"] == "SAFETY"
     assert decision.arguments["description"] == "充电座通电后冒烟，已经立即断电"
 
 
@@ -63,3 +64,12 @@ async def test_ticket_list_is_formatted_for_people_instead_of_raw_json(settings)
 
     assert "| #42 | 机器无法回充 | HIGH | OPEN |" in decision.answer
     assert decision.resolution.outcome == "action_completed"
+
+
+def test_retrieval_eval_dataset_has_valid_sources():
+    path = Path(__file__).parents[1] / "evals" / "retrieval_cases.json"
+    cases = json.loads(path.read_text(encoding="utf-8"))
+
+    assert len(cases) >= 4
+    assert all(case["question"].strip() for case in cases)
+    assert all(case["expected_sources"] for case in cases)

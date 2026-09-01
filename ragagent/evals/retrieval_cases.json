@@ -1,0 +1,18 @@
+[
+  {
+    "question": "扫地机器人吸力越来越小怎么办",
+    "expected_sources": ["扫地机器人100问2.txt", "扫拖一体机器人100问.txt", "故障排除.txt"]
+  },
+  {
+    "question": "机器人找不到充电座，无法回充怎么处理",
+    "expected_sources": ["故障排除.txt", "扫地机器人100问2.txt"]
+  },
+  {
+    "question": "过滤网应该多久清理一次",
+    "expected_sources": ["维护保养.txt", "扫地机器人100问2.txt", "扫拖一体机器人100问.txt"]
+  },
+  {
+    "question": "小户型选购扫地机器人需要关注什么",
+    "expected_sources": ["选购指南.txt", "扫地机器人100问.pdf"]
+  }
+]

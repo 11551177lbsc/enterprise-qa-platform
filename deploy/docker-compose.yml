@@ -1,86 +1,72 @@
 services:
   mysql:
     image: mysql:8.4
+    restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-ailll}
       MYSQL_USER: ${MYSQL_USERNAME:-ailll}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在.env中设置MYSQL_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在.env中设置MYSQL_ROOT_PASSWORD}
-    ports:
-      - "3306:3306"
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 30
+    networks: [backend]
 
   redis:
     image: redis:7.4-alpine
+    restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
+      interval: 10s
       timeout: 3s
       retries: 20
-
-  rabbitmq:
-    image: rabbitmq:4-management-alpine
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
+    networks: [backend]
 
   java-api:
-    build: ./aiLLL
+    build: ../aiLLL
+    restart: unless-stopped
     environment:
-      SPRING_PROFILES_ACTIVE: dev
+      SPRING_PROFILES_ACTIVE: production
+      SPRING_RABBITMQ_LISTENER_SIMPLE_AUTO_STARTUP: "false"
       MYSQL_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-ailll}?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       MYSQL_USERNAME: ${MYSQL_USERNAME:-ailll}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       REDIS_HOST: redis
-      RABBITMQ_HOST: rabbitmq
-      JWT_SECRET: ${JWT_SECRET:?请在.env中设置JWT_SECRET}
-      AGENT_SERVICE_TOKEN: ${AGENT_SERVICE_TOKEN:?请在.env中设置AGENT_SERVICE_TOKEN}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      AGENT_SERVICE_TOKEN: ${AGENT_SERVICE_TOKEN:?AGENT_SERVICE_TOKEN is required}
       LLM_API_KEY: ${LLM_API_KEY:-}
       RAG_BASE_URL: http://agent-api:8001
-    ports:
-      - "8080:8080"
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+    networks: [backend, egress]
 
   agent-api:
     build:
-      context: .
+      context: ..
       dockerfile: ragagent/Dockerfile
+    restart: unless-stopped
     environment:
-      AGENT_ENV: dev
+      AGENT_ENV: production
       AGENT_CHECKPOINT_BACKEND: redis
       REDIS_URL: redis://redis:6379/1
       JAVA_TOOL_BASE_URL: http://java-api:8080
       JWT_SECRET: ${JWT_SECRET}
       AGENT_SERVICE_TOKEN: ${AGENT_SERVICE_TOKEN}
       AGENT_PLANNER_MODE: auto
-      RAG_CONFIDENCE_THRESHOLD: ${RAG_CONFIDENCE_THRESHOLD:-0.58}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       RAG_ALLOW_INDEXING: "false"
-      AGENT_CORS_ORIGINS: http://localhost:8501
-    ports:
-      - "8001:8001"
+      RAG_CONFIDENCE_THRESHOLD: ${RAG_CONFIDENCE_THRESHOLD:-0.58}
+      AGENT_CORS_ORIGINS: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}
     volumes:
       - chroma-data:/app/ragagent/chroma_db
     depends_on:
@@ -88,22 +74,42 @@ services:
         condition: service_healthy
       java-api:
         condition: service_started
+    networks: [backend, egress]
 
   support-ui:
     build:
-      context: .
+      context: ..
       dockerfile: ragagent/Dockerfile
+    restart: unless-stopped
     command: ["python", "-m", "streamlit", "run", "ragagent/app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
     environment:
       UI_AGENT_BASE_URL: http://agent-api:8001
       UI_JAVA_BASE_URL: http://java-api:8080
-    ports:
-      - "8501:8501"
     depends_on:
       agent-api:
         condition: service_started
       java-api:
         condition: service_started
+    networks: [backend]
+
+  gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-8088}:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - support-ui
+      - agent-api
+      - java-api
+    networks: [backend, egress]
+
+networks:
+  backend:
+    internal: true
+  egress:
+    driver: bridge
 
 volumes:
   mysql-data:

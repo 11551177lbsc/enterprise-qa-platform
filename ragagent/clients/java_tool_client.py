@@ -45,6 +45,44 @@ class JavaToolClient:
             raise JavaToolError(str(payload.get("message") or "Java 工具执行失败"))
         return payload.get("data", payload) if isinstance(payload, dict) else payload
 
+    async def submit_feedback(
+        self,
+        *,
+        run_id: str,
+        question: str,
+        outcome: str,
+        comment: str | None,
+        confidence: float | None,
+        access_token: str,
+    ) -> Any:
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "X-Agent-Service-Token": self._service_token,
+        }
+        body = {
+            "runId": run_id,
+            "question": question,
+            "outcome": outcome,
+            "comment": comment,
+            "confidence": confidence,
+        }
+        async with httpx.AsyncClient(
+            base_url=self._base_url,
+            timeout=self._timeout,
+            transport=self._transport,
+        ) as client:
+            response = await client.post(
+                "/internal/agent-tools/support-feedback",
+                headers=headers,
+                json=body,
+            )
+        if response.status_code >= 400:
+            raise JavaToolError(f"Java 反馈网关调用失败：HTTP {response.status_code}")
+        payload = response.json()
+        if isinstance(payload, dict) and payload.get("success") is False:
+            raise JavaToolError(str(payload.get("message") or "反馈记录失败"))
+        return payload.get("data", payload) if isinstance(payload, dict) else payload
+
     @staticmethod
     def _request_spec(tool_name: str, args: dict[str, Any]) -> tuple[str, str, dict | None]:
         if tool_name == "get_current_user_profile":
@@ -53,6 +91,8 @@ class JavaToolClient:
             return "GET", "/internal/agent-tools/tickets", None
         if tool_name == "get_support_ticket":
             return "GET", f"/internal/agent-tools/tickets/{int(args['ticketId'])}", None
+        if tool_name == "get_ticket_timeline":
+            return "GET", f"/internal/agent-tools/tickets/{int(args['ticketId'])}/timeline", None
         if tool_name == "create_support_ticket":
             return "POST", "/internal/agent-tools/tickets", args
         if tool_name == "update_support_ticket":

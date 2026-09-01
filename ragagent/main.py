@@ -30,7 +30,7 @@ def _optional_chat_model(settings: Settings):
         return None
 
 
-def create_app(settings: Settings | None = None, planner=None, tools=None) -> FastAPI:
+def create_app(settings: Settings | None = None, planner=None, tools=None, feedback_client=None) -> FastAPI:
     settings = settings or Settings.from_env()
     settings.validate()
 
@@ -38,7 +38,8 @@ def create_app(settings: Settings | None = None, planner=None, tools=None) -> Fa
     async def lifespan(app: FastAPI):
         async with checkpoint_lifespan(settings) as checkpointer:
             selected_planner = planner or AgentPlanner(settings, _optional_chat_model(settings))
-            selected_tools = tools or AgentToolRegistry(JavaToolClient(settings))
+            java_client = JavaToolClient(settings)
+            selected_tools = tools or AgentToolRegistry(java_client)
             graph = EnterpriseAgentGraph(selected_planner, selected_tools).compile(checkpointer)
             redis_client = None
             run_store = None
@@ -55,6 +56,7 @@ def create_app(settings: Settings | None = None, planner=None, tools=None) -> Fa
                 settings,
                 store=run_store,
                 events=event_broker,
+                feedback_client=feedback_client or java_client,
             )
             app.state.authenticator = JwtAuthenticator(settings)
             app.state.settings = settings

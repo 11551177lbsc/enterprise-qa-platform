@@ -30,6 +30,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(ResultUtil.error(message));
     }
 
+    @ExceptionHandler(SecurityException.class)
+    public ResponseEntity<ResultUtil> handleForbidden(SecurityException exception) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ResultUtil.error(exception.getMessage()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ResultUtil> handleException(Exception exception) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

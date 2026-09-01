@@ -10,11 +10,14 @@
 - RAG 检索：保留原有文档切分、DashScope Embedding 与 ChromaDB 检索链路。
 - 置信度分流：低于可配置阈值时不直接回答，返回升级原因、下一步和结构化工单草稿。
 - 支持工作台：页面内完成注册、登录、知识问答、证据查看、工单升级和审批，不再复制 JWT。
+- 支持运营闭环：工单自动分类、按优先级计算 SLA、记录处理时间线，并汇总用户未解决反馈。
+- 知识治理入口：具备角色的支持人员可以查看高频知识缺口并更新治理状态。
 - Human-in-the-loop：创建/修改工单、生成通知必须经过 LangGraph `interrupt`。
 - 可恢复运行：生产模式使用 Redis checkpointer，运行元数据和 SSE 事件同样写入 Redis。
 - 双重认证：Python 校验用户 JWT；Java 内部工具网关再次校验 JWT 和独立服务令牌。
 - 身份不可伪造：Java 只使用 JWT 解析出的 `userId`，拒绝模型在工具参数中传入身份或令牌。
 - 幂等与审计：每次 Java 工具调用携带唯一 `invocationId`，数据库阻止重复副作用并保存结果。
+- 并发终态保护：Redis Run Store 使用 WATCH/CAS，取消、完成和失败不会相互覆盖。
 - 向后兼容：原 Java 同步/异步问答接口和 Python `/api/rag/*` 接口继续保留。
 - Agent 评测：数据集覆盖知识查询、用户信息、工单查询、创建、更新、通知及审批策略。
 
@@ -99,9 +102,9 @@ docker compose up --build
 - 支持中心：`http://127.0.0.1:8501`
 - RabbitMQ 管理页：`http://127.0.0.1:15672`
 
-Flyway 会在 Java 首次启动时自动创建/升级表，不需要手工复制 SQL 到 DataGrip。已有非空旧库会建立版本 1 基线，再执行 `V2__agent_tool_gateway.sql`；全新数据库会依次执行 V1、V2。
+Flyway 管理 V1～V3。当前个人数据库升级按用户约定先在 DataGrip 手工执行 V3 文件；建表和历史回填均可重复执行，Java 重启后 Flyway 可安全登记同一版本。全新数据库会依次执行 V1、V2、V3。
 
-详细步骤见 [本地启动指南](docs/startup.md)，产品路线见 [产品规划](docs/product-roadmap.md)，接口见 [API 文档](docs/api.md)，设计取舍见 [Agent 设计说明](docs/agent-design.md)。
+详细步骤见 [本地启动指南](docs/startup.md)，数据库升级见 [V3 升级说明](docs/database-upgrade-v3.md)，产品路线见 [产品规划](docs/product-roadmap.md)，评测见 [评测基线](docs/evaluation.md)，接口见 [API 文档](docs/api.md)。
 
 ## 测试
 
@@ -114,7 +117,7 @@ Set-Location aiLLL
 .\mvnw.cmd test
 ```
 
-当前自动化覆盖：读取工具无需审批、写工具暂停与恢复、拒绝不产生副作用、JWT 兼容、身份参数防篡改、API 401 边界和 7 类规划评测用例。
+当前自动化覆盖：读取工具无需审批、写工具暂停与恢复、拒绝不产生副作用、JWT 兼容、身份参数防篡改、API 401 边界、工单 SLA/时间线、知识缺口权限、失败审计和并发终态保护。
 
 ## 安全设计
 

@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from redis.asyncio import Redis
+from redis.exceptions import WatchError
 
 from ragagent.schemas.agent import AgentRun, RunStatus, utc_now
+
+
+class RunStateConflict(RuntimeError):
+    pass
 
 
 class MemoryRunStore:
@@ -21,16 +26,29 @@ class MemoryRunStore:
             run = self._runs.get(run_id)
             return run.model_copy(deep=True) if run else None
 
-    async def update(self, run_id: str, **changes) -> AgentRun:
+    async def update(
+        self,
+        run_id: str,
+        *,
+        expected_statuses: set[RunStatus] | None = None,
+        **changes,
+    ) -> AgentRun:
         async with self._lock:
             current = self._runs[run_id]
+            if expected_statuses is not None and current.status not in expected_statuses:
+                raise RunStateConflict(f"运行状态 {current.status} 不允许本次更新")
             changes["updatedAt"] = utc_now()
             updated = current.model_copy(update=changes, deep=True)
             self._runs[run_id] = updated
             return updated.model_copy(deep=True)
 
     async def cancel(self, run_id: str) -> AgentRun:
-        return await self.update(run_id, status=RunStatus.CANCELLED, pendingApproval=None)
+        return await self.update(
+            run_id,
+            expected_statuses={RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_APPROVAL},
+            status=RunStatus.CANCELLED,
+            pendingApproval=None,
+        )
 
 
 class RedisRunStore:
@@ -57,14 +75,38 @@ class RedisRunStore:
         value = await self._redis.get(self._key(run_id))
         return AgentRun.model_validate_json(value) if value else None
 
-    async def update(self, run_id: str, **changes) -> AgentRun:
-        current = await self.get(run_id)
-        if current is None:
-            raise KeyError(run_id)
-        changes["updatedAt"] = utc_now()
-        updated = current.model_copy(update=changes, deep=True)
-        await self._redis.set(self._key(run_id), updated.model_dump_json(), ex=self._ttl)
-        return updated
+    async def update(
+        self,
+        run_id: str,
+        *,
+        expected_statuses: set[RunStatus] | None = None,
+        **changes,
+    ) -> AgentRun:
+        key = self._key(run_id)
+        for _ in range(5):
+            async with self._redis.pipeline(transaction=True) as pipeline:
+                try:
+                    await pipeline.watch(key)
+                    value = await pipeline.get(key)
+                    if value is None:
+                        raise KeyError(run_id)
+                    current = AgentRun.model_validate_json(value)
+                    if expected_statuses is not None and current.status not in expected_statuses:
+                        raise RunStateConflict(f"运行状态 {current.status} 不允许本次更新")
+                    changes["updatedAt"] = utc_now()
+                    updated = current.model_copy(update=changes, deep=True)
+                    pipeline.multi()
+                    pipeline.set(key, updated.model_dump_json(), ex=self._ttl)
+                    await pipeline.execute()
+                    return updated
+                except WatchError:
+                    continue
+        raise RunStateConflict("运行状态并发更新冲突，请重试")
 
     async def cancel(self, run_id: str) -> AgentRun:
-        return await self.update(run_id, status=RunStatus.CANCELLED, pendingApproval=None)
+        return await self.update(
+            run_id,
+            expected_statuses={RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_APPROVAL},
+            status=RunStatus.CANCELLED,
+            pendingApproval=None,
+        )

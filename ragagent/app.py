@@ -72,12 +72,20 @@ def _decide_approval(run: dict[str, Any], approved: bool, reason: str) -> dict[s
 def build_ticket_creation_prompt(draft: dict[str, Any]) -> str:
     """把升级建议转换为可审计的显式写操作请求。"""
 
-    return (
-        "请创建支持工单：\n"
-        f"标题：{draft['title']}\n"
-        f"优先级：{draft['priority']}\n"
-        f"描述：{draft['description']}"
-    )
+    lines = [
+        "请创建支持工单：",
+        f"标题：{draft['title']}",
+        f"优先级：{draft['priority']}",
+        f"分类：{draft.get('category') or 'OTHER'}",
+    ]
+    if draft.get("productModel"):
+        lines.append(f"产品型号：{draft['productModel']}")
+    if draft.get("knowledgeConfidence") is not None:
+        lines.append(f"知识置信度：{float(draft['knowledgeConfidence']):.4f}")
+    if draft.get("escalationReason"):
+        lines.append(f"升级原因：{draft['escalationReason']}")
+    lines.append(f"描述：{draft['description']}")
+    return "\n".join(lines)
 
 
 def _assistant_message(run: dict[str, Any]) -> dict[str, Any]:
@@ -143,10 +151,14 @@ def _append_run(run: dict[str, Any]) -> None:
     st.session_state.messages.append(_assistant_message(run))
     st.session_state.pending = run if run["status"] == "waiting_approval" else None
     st.session_state.last_resolution = run.get("resolution")
+    st.session_state.last_run = run
 
 
 def _reset_session() -> None:
-    keys = ("token", "user_id", "username", "messages", "pending", "last_resolution", "last_question")
+    keys = (
+        "token", "user_id", "username", "role", "messages", "pending",
+        "last_resolution", "last_run", "last_question", "feedback_recorded",
+    )
     for key in keys:
         st.session_state.pop(key, None)
 
@@ -266,6 +278,35 @@ def _render_support_center() -> None:
                     st.session_state.queued_prompt = build_ticket_creation_prompt(draft)
                     st.rerun()
 
+    last_run = st.session_state.get("last_run")
+    if (
+        last_run
+        and last_run.get("status") == "completed"
+        and (last_run.get("resolution") or {}).get("outcome") == "answered"
+        and st.session_state.get("feedback_recorded") != last_run.get("runId")
+    ):
+        st.divider()
+        st.markdown("**这次建议是否解决了问题？**")
+        feedback_comment = st.text_input("补充反馈（可选）", key=f"feedback-{last_run['runId']}")
+        solved_col, unresolved_col = st.columns(2)
+        if solved_col.button("已解决", type="primary", use_container_width=True):
+            _submit_feedback(last_run, "RESOLVED", feedback_comment)
+        if unresolved_col.button("未解决，升级工单", use_container_width=True):
+            _submit_feedback(last_run, "UNRESOLVED", feedback_comment)
+            draft = {
+                "title": last_run["input"][:120],
+                "description": (
+                    f"用户问题：{last_run['input']}\n"
+                    f"知识库建议未能解决问题。用户反馈：{feedback_comment or '未补充'}"
+                ),
+                "priority": "MEDIUM",
+                "category": "DEVICE",
+                "knowledgeConfidence": (last_run.get("resolution") or {}).get("confidence"),
+                "escalationReason": "用户确认知识库建议未解决问题。",
+            }
+            st.session_state.queued_prompt = build_ticket_creation_prompt(draft)
+            st.rerun()
+
     queued = st.session_state.pop("queued_prompt", None)
     prompt = queued or st.chat_input("描述问题，或查询/更新我的支持工单")
     if prompt:
@@ -296,6 +337,59 @@ def _render_ticket_center() -> None:
         st.markdown(result)
 
 
+def _submit_feedback(run: dict[str, Any], outcome: str, comment: str) -> None:
+    response = httpx.post(
+        f"{AGENT_API_BASE}/api/agent/runs/{run['runId']}/feedback",
+        headers=_headers(),
+        json={
+            "outcome": outcome,
+            "comment": comment.strip() or None,
+        },
+        timeout=10,
+    )
+    if response.status_code >= 400:
+        st.error(_error_message(response))
+        return
+    st.session_state.feedback_recorded = run["runId"]
+    st.success("反馈已记录，将用于改进知识库。")
+
+
+def _render_knowledge_governance() -> None:
+    st.title("知识缺口")
+    st.caption("这里只汇总用户明确标记为“未解决”的问题，不展示模型隐藏推理。")
+    try:
+        response = httpx.get(
+            f"{JAVA_API_BASE}/api/support/knowledge-gaps",
+            headers=_headers(),
+            params={"limit": 50},
+            timeout=10,
+        )
+        if response.status_code >= 400:
+            st.error(_error_message(response))
+            return
+        gaps = response.json().get("data") or []
+        if not gaps:
+            st.info("当前没有待处理的知识缺口。")
+            return
+        st.dataframe(gaps, use_container_width=True, hide_index=True)
+        gap_id = st.selectbox("选择知识缺口", [item["id"] for item in gaps])
+        status = st.selectbox("处理状态", ["IN_REVIEW", "RESOLVED", "OPEN"])
+        if st.button("更新状态", type="primary"):
+            updated = httpx.patch(
+                f"{JAVA_API_BASE}/api/support/knowledge-gaps/{gap_id}",
+                headers=_headers(),
+                json={"status": status},
+                timeout=10,
+            )
+            if updated.status_code >= 400:
+                st.error(_error_message(updated))
+            else:
+                st.success("知识缺口状态已更新。")
+                st.rerun()
+    except httpx.HTTPError as exc:
+        st.error(f"知识治理服务不可用：{exc}")
+
+
 def _render_system_status() -> None:
     st.title("系统状态")
     st.caption("这里只展示非敏感运行状态，服务地址来自环境变量，不需要用户手工填写。")
@@ -312,7 +406,7 @@ def _render_system_status() -> None:
 
 st.set_page_config(page_title="企业支持解决中心", page_icon="🛠️", layout="wide")
 
-for key, default in {"messages": [], "pending": None, "last_resolution": None}.items():
+for key, default in {"messages": [], "pending": None, "last_resolution": None, "last_run": None}.items():
     if key not in st.session_state:
         st.session_state[key] = default
 
@@ -322,7 +416,19 @@ if not st.session_state.get("token"):
 
 st.sidebar.title("支持工作台")
 st.sidebar.success(f"已登录：{st.session_state.get('username', '当前用户')}")
-page = st.sidebar.radio("功能", ["智能支持", "我的工单", "系统状态"])
+if "role" not in st.session_state:
+    try:
+        role_response = httpx.get(f"{JAVA_API_BASE}/api/support/me", headers=_headers(), timeout=5)
+        st.session_state.role = (
+            role_response.json().get("data", {}).get("role", "USER")
+            if role_response.status_code < 400 else "USER"
+        )
+    except httpx.HTTPError:
+        st.session_state.role = "USER"
+pages = ["智能支持", "我的工单", "系统状态"]
+if st.session_state.role in {"SUPPORT_AGENT", "KNOWLEDGE_ADMIN", "ADMIN"}:
+    pages.insert(2, "知识缺口")
+page = st.sidebar.radio("功能", pages)
 if st.sidebar.button("退出登录", use_container_width=True):
     _reset_session()
     st.rerun()
@@ -331,5 +437,7 @@ if page == "智能支持":
     _render_support_center()
 elif page == "我的工单":
     _render_ticket_center()
+elif page == "知识缺口":
+    _render_knowledge_governance()
 else:
     _render_system_status()

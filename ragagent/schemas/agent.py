@@ -44,6 +44,10 @@ class TicketDraft(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     description: str = Field(min_length=1, max_length=4000)
     priority: str = Field(pattern="^(LOW|MEDIUM|HIGH|URGENT)$")
+    category: str = Field(default="OTHER", pattern="^(DEVICE|ACCOUNT|ORDER|BILLING|SAFETY|OTHER)$")
+    productModel: str | None = Field(default=None, max_length=120)
+    knowledgeConfidence: float | None = Field(default=None, ge=0, le=1)
+    escalationReason: str | None = Field(default=None, max_length=500)
 
 
 class ResolutionSummary(BaseModel):
@@ -87,6 +91,16 @@ class AgentRunAccepted(BaseModel):
 class ApprovalRequest(BaseModel):
     approved: bool
     reason: str | None = Field(default=None, max_length=500)
+
+
+class FeedbackOutcome(StrEnum):
+    RESOLVED = "RESOLVED"
+    UNRESOLVED = "UNRESOLVED"
+
+
+class RunFeedbackRequest(BaseModel):
+    outcome: FeedbackOutcome
+    comment: str | None = Field(default=None, max_length=1000)
 
 
 class AgentEvent(BaseModel):

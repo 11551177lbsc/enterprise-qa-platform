@@ -5,8 +5,8 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from ragagent.agent.service import AgentRunNotFound, AgentRunService, ApprovalConflict
-from ragagent.schemas.agent import AgentRun, AgentRunAccepted, AgentRunRequest, ApprovalRequest, RunStatus
+from ragagent.agent.service import AgentRunNotFound, AgentRunService, ApprovalConflict, RunConflict
+from ragagent.schemas.agent import AgentRun, AgentRunAccepted, AgentRunRequest, ApprovalRequest, RunFeedbackRequest, RunStatus
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
@@ -59,6 +59,23 @@ async def cancel_run(run_id: str, user=Depends(current_user), service: AgentRunS
         return await service.cancel(run_id, user.user_id)
     except AgentRunNotFound as exc:
         raise HTTPException(status_code=404, detail="运行不存在") from exc
+    except RunConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/feedback")
+async def submit_feedback(
+    run_id: str,
+    payload: RunFeedbackRequest,
+    user=Depends(current_user),
+    service: AgentRunService = Depends(service_from),
+):
+    try:
+        return await service.feedback(run_id, payload, user)
+    except AgentRunNotFound as exc:
+        raise HTTPException(status_code=404, detail="运行不存在") from exc
+    except RunConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/runs/{run_id}/events")

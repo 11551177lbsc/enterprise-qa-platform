@@ -8,16 +8,19 @@ from langgraph.types import Command
 from ragagent.agent.events import EventBroker
 from ragagent.agent.state import AgentContext
 from ragagent.persistence.run_store import MemoryRunStore
+from ragagent.persistence.run_store import RunStateConflict
 from ragagent.schemas.agent import (
     AgentEvent,
     AgentRun,
     AgentRunAccepted,
     AgentRunRequest,
     ApprovalRequest,
+    RunFeedbackRequest,
     Citation,
     PendingApproval,
     RunStatus,
     ResolutionSummary,
+    ResolutionOutcome,
 )
 from ragagent.security.jwt_auth import AuthenticatedUser
 from ragagent.settings import Settings
@@ -31,6 +34,10 @@ class ApprovalConflict(RuntimeError):
     pass
 
 
+class RunConflict(RuntimeError):
+    pass
+
+
 class AgentRunService:
     def __init__(
         self,
@@ -38,11 +45,13 @@ class AgentRunService:
         settings: Settings,
         store=None,
         events=None,
+        feedback_client=None,
     ):
         self.graph = graph
         self.settings = settings
         self.store = store or MemoryRunStore()
         self.events = events or EventBroker()
+        self.feedback_client = feedback_client
         self._tasks: dict[str, asyncio.Task] = {}
 
     async def start(self, request: AgentRunRequest, user: AuthenticatedUser) -> AgentRunAccepted:
@@ -80,7 +89,14 @@ class AgentRunService:
             raise ApprovalConflict("当前运行不在待审批状态")
         if run.pendingApproval.approvalId != approval_id:
             raise ApprovalConflict("approvalId 不匹配")
-        run = await self.store.update(run_id, status=RunStatus.RUNNING)
+        try:
+            run = await self.store.update(
+                run_id,
+                expected_statuses={RunStatus.WAITING_APPROVAL},
+                status=RunStatus.RUNNING,
+            )
+        except RunStateConflict as exc:
+            raise ApprovalConflict("运行状态已变化，请刷新后重试") from exc
         await self._emit(run_id, "approval.decided", request.model_dump())
         task = asyncio.create_task(
             self._resume(run, user.token, request),
@@ -95,12 +111,46 @@ class AgentRunService:
         task = self._tasks.get(run_id)
         if task and not task.done():
             task.cancel()
-        cancelled = await self.store.cancel(run_id)
+        try:
+            cancelled = await self.store.cancel(run_id)
+        except RunStateConflict as exc:
+            raise RunConflict("已结束的运行不能取消") from exc
         await self._emit(run_id, "run.cancelled", {})
         return cancelled
 
+    async def feedback(
+        self,
+        run_id: str,
+        request: RunFeedbackRequest,
+        user: AuthenticatedUser,
+    ) -> dict:
+        run = await self.get(run_id, user.user_id)
+        if (
+            run.status != RunStatus.COMPLETED
+            or not run.resolution
+            or run.resolution.outcome != ResolutionOutcome.ANSWERED
+        ):
+            raise RunConflict("只有已完成的知识处理运行可以提交反馈")
+        if self.feedback_client is None:
+            raise RuntimeError("反馈网关尚未配置")
+        return await self.feedback_client.submit_feedback(
+            run_id=run.runId,
+            question=run.input,
+            outcome=request.outcome.value,
+            comment=request.comment,
+            confidence=run.resolution.confidence,
+            access_token=user.token,
+        )
+
     async def _execute_initial(self, run: AgentRun, access_token: str) -> None:
-        await self.store.update(run.runId, status=RunStatus.RUNNING)
+        try:
+            await self.store.update(
+                run.runId,
+                expected_statuses={RunStatus.QUEUED},
+                status=RunStatus.RUNNING,
+            )
+        except RunStateConflict:
+            return
         await self._emit(run.runId, "run.started", {})
         state = {
             "run_id": run.runId,
@@ -128,6 +178,7 @@ class AgentRunService:
                 pending = PendingApproval.model_validate(value)
                 await self.store.update(
                     run.runId,
+                    expected_statuses={RunStatus.RUNNING},
                     status=RunStatus.WAITING_APPROVAL,
                     pendingApproval=pending,
                 )
@@ -139,6 +190,7 @@ class AgentRunService:
             resolution = ResolutionSummary.model_validate(raw_resolution) if raw_resolution else None
             await self.store.update(
                 run.runId,
+                expected_statuses={RunStatus.RUNNING},
                 status=RunStatus.COMPLETED,
                 answer=result.get("final_answer"),
                 citations=citations,
@@ -148,9 +200,21 @@ class AgentRunService:
             await self._emit(run.runId, "run.completed", {"answer": result.get("final_answer")})
         except asyncio.CancelledError:
             raise
+        except RunStateConflict:
+            # 取消或并发审批已经改变状态时，不允许迟到的执行结果覆盖终态。
+            return
         except Exception as exc:
-            await self.store.update(run.runId, status=RunStatus.FAILED, error=str(exc), pendingApproval=None)
-            await self._emit(run.runId, "run.failed", {"message": str(exc)})
+            try:
+                await self.store.update(
+                    run.runId,
+                    expected_statuses={RunStatus.RUNNING},
+                    status=RunStatus.FAILED,
+                    error=str(exc),
+                    pendingApproval=None,
+                )
+                await self._emit(run.runId, "run.failed", {"message": str(exc)})
+            except RunStateConflict:
+                return
 
     async def _emit(self, run_id: str, event_type: str, data: dict) -> None:
         await self.events.publish(AgentEvent(runId=run_id, type=event_type, data=data))

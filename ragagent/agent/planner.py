@@ -60,7 +60,7 @@ class AgentPlanner:
                     content=(
                         "可用工具：search_knowledge_base、get_current_user_profile、"
                         "list_support_tickets、get_support_ticket、create_support_ticket、"
-                        "update_support_ticket、send_ticket_notification。\n用户请求：" + text
+                        "get_ticket_timeline、update_support_ticket、send_ticket_notification。\n用户请求：" + text
                     )
                 ),
             ]
@@ -77,11 +77,10 @@ class AgentPlanner:
 
         if "工单" in normalized or "ticket" in lower:
             if any(word in normalized for word in ("创建", "新建", "提交", "反馈")):
-                title, description, priority = AgentPlanner._parse_ticket_request(normalized)
                 return PlanningDecision(
                     action="tool",
                     tool_name="create_support_ticket",
-                    arguments={"title": title, "description": description, "priority": priority},
+                    arguments=AgentPlanner._parse_ticket_request(normalized),
                     intent="ticket_write",
                 )
             if any(word in normalized for word in ("通知", "提醒", "发送")) and ticket_match:
@@ -100,6 +99,13 @@ class AgentPlanner:
                     intent="ticket_write",
                 )
             if ticket_match:
+                if any(word in normalized for word in ("时间线", "处理记录", "处理进度", "操作记录")):
+                    return PlanningDecision(
+                        action="tool",
+                        tool_name="get_ticket_timeline",
+                        arguments={"ticketId": int(ticket_match.group(1))},
+                        intent="ticket_read",
+                    )
                 return PlanningDecision(
                     action="tool",
                     tool_name="get_support_ticket",
@@ -126,6 +132,8 @@ class AgentPlanner:
             answer = self._format_ticket_list(data)
         elif tool == "get_support_ticket":
             answer = self._format_ticket(data)
+        elif tool == "get_ticket_timeline":
+            answer = self._format_ticket_timeline(data)
         elif tool in {"create_support_ticket", "update_support_ticket"}:
             answer = "操作已完成。\n\n" + self._format_ticket(data)
         else:
@@ -240,18 +248,42 @@ class AgentPlanner:
             f"相关资料：{sources}\n"
             "请人工支持进一步诊断；提交前用户可补充型号、故障现象和已尝试步骤。"
         )
-        return TicketDraft(title=title, description=description, priority=priority)
+        reason = f"知识库最佳匹配度 {confidence:.2f}，无法在安全阈值内解决。"
+        return TicketDraft(
+            title=title,
+            description=description,
+            priority=priority,
+            category=AgentPlanner._infer_category(cleaned),
+            knowledgeConfidence=round(confidence, 4),
+            escalationReason=reason,
+        )
 
     @staticmethod
-    def _parse_ticket_request(text: str) -> tuple[str, str, str]:
+    def _parse_ticket_request(text: str) -> dict[str, Any]:
         title_match = re.search(r"标题[：:]\s*([^\n；;]+)", text)
         description_match = re.search(r"描述[：:]\s*(.+)", text, re.DOTALL)
         priority_match = re.search(r"优先级[：:]\s*(LOW|MEDIUM|HIGH|URGENT)", text, re.IGNORECASE)
+        category_match = re.search(
+            r"分类[：:]\s*(DEVICE|ACCOUNT|ORDER|BILLING|SAFETY|OTHER)", text, re.IGNORECASE
+        )
+        model_match = re.search(r"产品型号[：:]\s*([^\n；;]+)", text)
+        confidence_match = re.search(r"知识置信度[：:]\s*(0(?:\.\d+)?|1(?:\.0+)?)", text)
+        escalation_match = re.search(r"升级原因[：:]\s*([^\n]+)", text)
         fallback_title = re.sub(r"^.*?(?:创建|新建|提交|反馈)(?:一个|一条)?(?:支持|售后)?工单[：:\s]*", "", text)
         title = (title_match.group(1) if title_match else fallback_title).strip() or "用户支持请求"
         description = (description_match.group(1) if description_match else text).strip()
         priority = priority_match.group(1).upper() if priority_match else AgentPlanner._infer_priority(text)
-        return title[:120], description[:4000], priority
+        return {
+            "title": title[:120],
+            "description": description[:4000],
+            "priority": priority,
+            "category": (
+                category_match.group(1).upper() if category_match else AgentPlanner._infer_category(text)
+            ),
+            "productModel": model_match.group(1).strip()[:120] if model_match else None,
+            "knowledgeConfidence": float(confidence_match.group(1)) if confidence_match else None,
+            "escalationReason": escalation_match.group(1).strip()[:500] if escalation_match else None,
+        }
 
     @staticmethod
     def _infer_priority(text: str) -> str:
@@ -260,6 +292,20 @@ class AgentPlanner:
         if any(word in text for word in ("无法开机", "无法充电", "无法回充", "漏水", "异常高温", "完全无法使用")):
             return "HIGH"
         return "MEDIUM"
+
+    @staticmethod
+    def _infer_category(text: str) -> str:
+        if any(word in text for word in ("起火", "冒烟", "爆炸", "触电", "安全")):
+            return "SAFETY"
+        if any(word in text for word in ("账号", "登录", "密码", "验证码")):
+            return "ACCOUNT"
+        if any(word in text for word in ("订单", "物流", "发货", "退货")):
+            return "ORDER"
+        if any(word in text for word in ("付款", "支付", "发票", "退款", "账单")):
+            return "BILLING"
+        if any(word in text for word in ("机器", "设备", "机器人", "充电", "故障", "型号")):
+            return "DEVICE"
+        return "OTHER"
 
     @staticmethod
     def _business_next_steps(tool: str, data: Any) -> list[str]:
@@ -310,6 +356,25 @@ class AgentPlanner:
             f"- 标题：{data.get('title') or '-'}\n"
             f"- 优先级：{data.get('priority') or '-'}\n"
             f"- 状态：{data.get('status') or '-'}\n"
+            f"- 分类：{data.get('category') or 'OTHER'}\n"
+            f"- 产品型号：{data.get('productModel') or '未填写'}\n"
+            f"- SLA 截止：{data.get('slaDueAt') or '-'}\n"
             f"- 更新时间：{data.get('updatedAt') or '-'}\n\n"
             f"**问题描述**\n\n{data.get('description') or '-'}"
         )
+
+    @staticmethod
+    def _format_ticket_timeline(data: Any) -> str:
+        events = data if isinstance(data, list) else []
+        if not events:
+            return "该工单暂时没有处理记录。"
+        lines = ["### 工单处理时间线", ""]
+        for event in events:
+            status = ""
+            if event.get("toStatus"):
+                status = f" · {event.get('fromStatus') or '-'} → {event['toStatus']}"
+            lines.append(
+                f"- **{event.get('createdAt') or '-'}** · {event.get('eventType') or 'EVENT'}{status}\n"
+                f"  {event.get('content') or '-'}"
+            )
+        return "\n".join(lines)
